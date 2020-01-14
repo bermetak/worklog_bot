@@ -44,20 +44,17 @@ from get_excel import get_excel
 
 def add_employee(chat_id, user_id, message):
     e = Employee.query.filter_by(telegram_id=user_id).first()
-    # name = message[4:].strip()
     name = message.strip('/new').strip()
     if e:
         e.name = name
         db.session.add(e)
         db.session.commit()
-        return Response(status=200)
     else:
         e = Employee(telegram_id=int(user_id), name=str(name))
         db.session.add(e)
         db.session.commit()
         m = name + NEW_EMPLOYEE_INFO
         send_message(chat_id, m)
-        return Response(status=200)
 
 
 def get_local_datetime(raw_dt):
@@ -94,7 +91,6 @@ def log_in(employee, date, time):
     log = Log(date=date, start=time, late=late, employee_id=employee.id)
     db.session.add(log)
     db.session.commit()
-    return Response(status=200)
 
 
 def log_out(employee, date, time):
@@ -104,7 +100,6 @@ def log_out(employee, date, time):
         log.worktime = get_worktime(log.start, log.end, date)
         db.session.add(log)
         db.session.commit()
-        return Response(status=200)
     else:
         # Log not found
         pass
@@ -139,10 +134,8 @@ def handle_bot_command(message, user_id, chat_id):
     elif 'report' in message:
         file = get_excel()
         send_file(chat_id, file)
-        return Response(status=200)
     else:
         send_message(chat_id, 'A command is not recognized.')
-        return Response(status=200)
 
 
 def handle_message(message, user_id, chat_id, raw_time):
@@ -158,7 +151,6 @@ def handle_message(message, user_id, chat_id, raw_time):
             pass
     else:
         send_message(chat_id, f'Пользователь не найден. {NEW_MEMBER_INFO}')
-        return Response(status=200)
 
 
 @app.route(f'/{token}', methods=['POST'])
@@ -173,8 +165,10 @@ def get_updates():
                 if r['message'].get('entities'):
                     # if message contain bot commands
                     handle_bot_command(message, user_id, chat_id)
+                    return Response(status=200)
                 time = r['message']['date']
                 handle_message(message, user_id, chat_id, time)
+                return Response(status=200)
             elif r['message'].get('new_chat_members'):
                 send_message(chat_id, NEW_MEMBER_INFO)
                 return Response(status=200)

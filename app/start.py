@@ -1,40 +1,46 @@
 # -*- coding: utf-8 -*-
 
-
-import datetime
-import pytz
-import requests
-from Levenshtein import distance
+import os
+import datetime, pytz, requests
 
 from flask import Flask, request, Response
-from flask_sslify import SSLify
-import os
-
 from flask_sqlalchemy import SQLAlchemy
 
+from Levenshtein import distance
 
 app = Flask(__name__)
-sslify = SSLify(app)
 
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:////path_to_db'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = True
+
+# Database settings
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ['SQLALCHEMY_DATABASE_URI']
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = os.environ['SQLALCHEMY_TRACK_MODIFICATIONS']
 db = SQLAlchemy(app)
+
+
+# Set local timezone in format http://pytz.sourceforge.net/
+TZ = pytz.timezone(os.environ['TIMEZONE'])
+
+
+# Telegram bot settings
+token = os.environ['BOT_TOKEN']
+GROUP_IDS = os.environ['GROUP_IDS']
+URL = f'https://api.telegram.org/bot{token}/'
+
+
+# Message, that bot sends when new member will be added to group
+NEW_MEMBER_INFO = os.environ['NEW_MEMBER_INFO']
+# Message, that bot sends when new member will set his name
+NEW_EMPLOYEE_INFO = os.environ['NEW_EMPLOYEE_INFO']
+
+# Set up work schedule, lateness time and lunch time
+WORK_SCHEDULE = {'start': datetime.time(9, 00), 'end': datetime.time(18, 00)}
+LATE_TIME = {'start': datetime.time(9, 5), 'end': datetime.time(9, 30)}
+LUNCH_TIME = {'start': datetime.time(12, 00), 'end': datetime.time(13, 00)}
+
 
 from models import Employee, Log
 from get_excel import get_excel
 
-TZ = pytz.timezone('Asia/Bishkek')
-token = os.environ['BOT_TOKEN']
-URL = f'https://api.telegram.org/bot{token}/'
-GROUP_IDS = os.environ['GROUP_IDS']
-
-
-NEW_MEMBER = '''Добро пожаловать в чат для ворклога! 
-            Вам нужно представиться, для этого отправьте в чат сообщение в формате:
-            /new Фамилия Имя'''
-SCHEDULE = {'start': datetime.time(9, 00), 'end': datetime.time(18, 00)}
-LATE_TIME = {'not_late': datetime.time(9, 5), 'too_late': datetime.time(9, 30)}
-LUNCH_TIME = {'start': datetime.time(12, 00), 'end': datetime.time(13, 00)}
 
 
 def add_employee(chat_id, user_id, message):
@@ -49,11 +55,7 @@ def add_employee(chat_id, user_id, message):
         e = Employee(telegram_id=int(user_id), name=str(name))
         db.session.add(e)
         db.session.commit()
-        m = f'''{name}, вы записаны! 
-               Теперь вы можете отмечаться, для этого, как только вы пришли в офис и 
-               ваш аппарат находится в рабочей сети Ooba, отправьте в чат сообщение
-               "пришел" или "пришла". 
-               Если вы уходите из офиса, отправьте в чат сообщение "ушел" или "ушла"'''
+        m = name + NEW_EMPLOYEE_INFO
         send_message(chat_id, m)
         return Response(status=200)
 
@@ -65,8 +67,8 @@ def get_utc_datetime(raw_dt):
 
 
 def get_worktime(start, end, date):
-    start1 = max(start.time(), SCHEDULE.get('start'))
-    end1 = min(end.time(), SCHEDULE.get('end'))
+    start1 = max(start.time(), WORK_SCHEDULE.get('start'))
+    end1 = min(end.time(), WORK_SCHEDULE.get('end'))
     if end1 > start1:
         lunch_start = max(start1, LUNCH_TIME.get('start'))
         lunch_end = min(end1, LUNCH_TIME.get('end'))
@@ -97,7 +99,7 @@ def work_log(employee, message, raw_dt):
             # Log exists
             pass
         else:
-            if LATE_TIME.get('not_late') < time.time() < LATE_TIME.get('too_late'):
+            if LATE_TIME.get('start') < time.time() < LATE_TIME.get('end'):
                 late = True
             else:
                 late = False
@@ -171,10 +173,10 @@ def get_message():
                     work_log(employee, message, time)
                     return Response(status=200)
                 else:
-                    send_message(chat_id, f'Пользователь не найден. {NEW_MEMBER}')
+                    send_message(chat_id, f'Пользователь не найден. {NEW_MEMBER_INFO}')
                     return Response(status=200)
         elif r['message'].get('new_chat_members'):
-            send_message(chat_id, NEW_MEMBER)
+            send_message(chat_id, NEW_MEMBER_INFO)
             return Response(status=200)
         else:
             return Response(status=200)

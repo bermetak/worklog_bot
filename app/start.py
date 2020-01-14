@@ -42,11 +42,11 @@ from models import Employee, Log
 from get_excel import get_excel
 
 
-
 def add_employee(chat_id, user_id, message):
     e = Employee.query.filter_by(telegram_id=user_id).first()
-    name = message[4:].strip()
-    if e is not None:
+    # name = message[4:].strip()
+    name = message.strip('/new').strip()
+    if e:
         e.name = name
         db.session.add(e)
         db.session.commit()
@@ -60,7 +60,7 @@ def add_employee(chat_id, user_id, message):
         return Response(status=200)
 
 
-def get_utc_datetime(raw_dt):
+def get_local_datetime(raw_dt):
     form_dt = datetime.datetime.fromtimestamp(raw_dt)
     time = pytz.utc.localize(form_dt, is_dst=None).astimezone(TZ)
     return time.replace(tzinfo=None)
@@ -89,46 +89,29 @@ def get_worktime(start, end, date):
         return 0
 
 
-def work_log(employee, message, raw_dt):
-    time = get_utc_datetime(raw_dt)
-    date = time.date()
+def log_in(employee, date, time):
+    late = True if (LATE_TIME.get('start') < time.time() < LATE_TIME.get('end')) else late = False
+    log = Log(date=date, start=time, late=late, employee_id=employee.id)
+    db.session.add(log)
+    db.session.commit()
+    return Response(status=200)
 
+
+def log_out(employee, date, time):
     log = Log.query.filter_by(date=date, employee_id=employee.id).first()
-    if distance(message.lower(), 'пришл') <= 2:
-        if log:
-            # Log exists
-            pass
-        else:
-            if LATE_TIME.get('start') < time.time() < LATE_TIME.get('end'):
-                late = True
-            else:
-                late = False
-            log = Log(date=date, start=time, late=late, employee_id=employee.id)
-            db.session.add(log)
-            db.session.commit()
-            return Response(status=200)
-
-    elif distance(message.lower(), 'ушл') <= 2:
-        if log:
-            if log.end:
-                # Log exists
-                pass
-            else:
-                log.end = time
-                log.worktime = get_worktime(log.start, log.end, date)
-                db.session.add(log)
-                db.session.commit()
-                return Response(status=200)
-        else:
-            # Log not found
-            pass
+    if log:
+        log.end = time
+        log.worktime = get_worktime(log.start, log.end, date)
+        db.session.add(log)
+        db.session.commit()
+        return Response(status=200)
     else:
-        # message not recognized
+        # Log not found
         pass
 
 
 @app.route('/', methods=['GET'])
-def get_updates():
+def get_webhook_info():
     url = URL + 'getUpdates'
     response = requests.get(url)
     return response.json()
@@ -150,40 +133,61 @@ def send_file(chat_id, file):
     return response.json()
 
 
-@app.route(f'/{token}', methods=['POST'])
-def get_message():
-    r = request.get_json()
-    user_id = r['message']['from']['id']
-    chat_id = r['message']['chat']['id']
-    if str(chat_id) in GROUP_IDS:
-        if r['message'].get('text'):
-            message = r['message']['text'].encode().decode('utf-8')
-
-            if 'new' in message:
-                add_employee(chat_id, user_id, message)
-                return Response(status=200)
-            elif 'report' in message:
-                file = get_excel()
-                send_file(chat_id, file)
-                return Response(status=200)
-            else:
-                employee = Employee.query.filter_by(telegram_id=user_id).first()
-                if employee:
-                    time = r['message']['date']
-                    work_log(employee, message, time)
-                    return Response(status=200)
-                else:
-                    send_message(chat_id, f'Пользователь не найден. {NEW_MEMBER_INFO}')
-                    return Response(status=200)
-        elif r['message'].get('new_chat_members'):
-            send_message(chat_id, NEW_MEMBER_INFO)
-            return Response(status=200)
-        else:
-            return Response(status=200)
+def handle_bot_command(message, user_id, chat_id):
+    if 'new' in message:
+        add_employee(chat_id, user_id, message)
+    elif 'report' in message:
+        file = get_excel()
+        send_file(chat_id, file)
+        return Response(status=200)
     else:
-        send_message(chat_id, "Hello, I'm private chat bot. Contact my owner @akynbekova")
+        send_message(chat_id, 'A command is not recognized.')
         return Response(status=200)
 
+
+def handle_message(message, user_id, chat_id, raw_time):
+    employee = Employee.query.filter_by(telegram_id=user_id).first()
+    if employee:
+        time = get_local_datetime(raw_time)
+        date = time.date()
+        if distance(message.lower(), 'пришл') <= 2:
+            log_in(employee, date, time)
+        elif distance(message.lower(), 'ушл') <= 2:
+            log_out(employee, date, time)
+        else:
+            pass
+    else:
+        send_message(chat_id, f'Пользователь не найден. {NEW_MEMBER_INFO}')
+        return Response(status=200)
+
+
+@app.route(f'/{token}', methods=['POST'])
+def get_updates():
+    r = request.get_json()
+    if r.get('message'):
+        user_id = r['message']['from']['id']
+        chat_id = r['message']['chat']['id']
+        if str(chat_id) in GROUP_IDS:
+            if r['message'].get('text'):
+                message = r['message']['text'].encode().decode('utf-8')
+                if r['message'].get('entities'):
+                    # if message contain bot commands
+                    handle_bot_command(message, user_id, chat_id)
+                time = r['message']['date']
+                handle_message(message, user_id, chat_id, time)
+            elif r['message'].get('new_chat_members'):
+                send_message(chat_id, NEW_MEMBER_INFO)
+                return Response(status=200)
+            else:
+                # pass telegram system messages
+                return Response(status=200)
+        else:
+            # pass messages from unknown chats
+            send_message(chat_id, "Hello, I'm private chat bot. Contact my owner @akynbekova")
+            return Response(status=200)
+    else:
+        # pass telegram system messages
+        return Response(status=200)
 
 
 if __name__ == '__main__':

@@ -1,6 +1,6 @@
+import datetime
 from pyexcel_xls import save_data
 from collections import OrderedDict
-import datetime
 from start import db
 from models import Employee, Log
 
@@ -37,7 +37,7 @@ def get_excel():
     work_days = get_workdays(logs)
 
     table1 = get_table_list(work_days)
-    table2 = table1.copy()
+    table2 = list(table1)
 
     for employee in Employee.query.all():
         employee_logs, employee_lateness = dict(), dict()
@@ -50,15 +50,8 @@ def get_excel():
         lateness = [employee.name]
         for day in work_days:
             if day in employee_logs.keys():
-                if employee_logs[day] is None:
-                    worklogs.append(0)
-                else:
-                    worklogs.append(employee_logs[day])
-
-                if employee_lateness[day]:
-                    lateness.append(1)
-                else:
-                    lateness.append(0)
+                worklogs.append(0) if employee_logs[day] is None else worklogs.append(employee_logs[day])
+                lateness.append(1) if employee_lateness[day] else lateness.append(0)
             else:
                 worklogs.append(0)
                 lateness.append(0)
@@ -75,5 +68,4 @@ def get_excel():
     data.update({'Опоздания': table2})
 
     save_data(f"{month_name}.xls", data)
-
     return open(f"{month_name}.xls", 'rb')
